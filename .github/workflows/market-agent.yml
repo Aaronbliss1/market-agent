@@ -5,6 +5,9 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 concurrency:
   group: market-agent
   cancel-in-progress: false
