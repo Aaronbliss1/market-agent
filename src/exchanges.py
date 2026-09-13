@@ -204,10 +204,17 @@ class BitgetExchange(Exchange):
                 "l": arr[:, 3], "c": arr[:, 4], "v": arr[:, 5]}
 
     def price(self, ticker: str) -> float | None:
+        # NOTE: the /tickers (plural) endpoint IGNORES the symbol filter and
+        # returns the full list — using data[0] would return a random coin's
+        # price (e.g. BTC) for any symbol. Match the symbol explicitly.
         d = self.s.get(self.base + "/api/v2/mix/market/tickers",
                        params={"productType": "USDT-FUTURES", "symbol": ticker + "USDT"},
                        timeout=10).json()
-        return float(d["data"][0]["lastPr"])
+        sym = ticker + "USDT"
+        for row in (d.get("data") or []):
+            if row.get("symbol") == sym:
+                return float(row["lastPr"])
+        return None  # not listed on this exchange
 
 
 class ExchangeRegistry:

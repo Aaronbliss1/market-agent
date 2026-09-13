@@ -568,6 +568,13 @@ class Engine:
             price = self.x.price(call["exchange"], call["ticker"])
             if price is None:
                 continue
+            # quote sanity: our stops/targets sit within ±60% of entry, so a
+            # deviation beyond 100% in one check is bad data (e.g. a symbol
+            # mis-mapped by an exchange API), not a market move — skip it.
+            if abs(price / call["entry"] - 1) > 1.0:
+                log.warning("track %s: implausible quote %.6g vs entry %.6g — skipped",
+                            call["ticker"], price, call["entry"])
+                continue
             now = time.time()
             long_call = call["direction"] == "LONG"
             status = None
@@ -678,50 +685,75 @@ class Engine:
 
     # ---------------- misc ----------------
     def status_text(self) -> str:
-        ex_status = self.x.status()
-        ex_txt = " | ".join(f"{k} {'✓' if ok else '✗ ' + err}" for k, (ok, err) in ex_status.items())
-        wallet_txt = self.wallets.summary()
+        now = time.time()
         open_calls = self.store.open_calls() if self.store else []
-        since_day = local_midnight()
-        today = self.store.calls_since(since_day) if self.store else []
-        if self.dune.enabled:
-            age = f"{(time.time() - self.dune.last_fetch) / 60:.0f}m ago" if self.dune.last_fetch else "not yet"
-            dune_txt = f"enabled (query #{self.dune.query_id}, last fetch {age}, {self.dune.last_flows} flows)"
-            if self.dune.last_error:
-                dune_txt += f" — last error: {self.dune.last_error[:120]}"
+        open_calls = sorted(open_calls, key=lambda c: c["ts"])
+        today = self.store.calls_since(local_midnight()) if self.store else []
+
+        src_label = {"dune": "Dune", "etherscan": "Etherscan", "rpc": "Public RPC"}
+        src_map = {}
+        if open_calls and self.store:
+            src_map = self.store.flow_sources([c["ticker"] for c in open_calls])
+
+        lines = ["🤖 MARKET AGENT — STATUS UPDATE", ""]
+
+        # ---- active trades (unsettled, live)
+        lines.append("📈 Active Trades")
+        if open_calls:
+            for c in open_calls:
+                held_h = (now - c["ts"]) / 3600
+                sgn = 1.0 if c["direction"] == "LONG" else -1.0
+                price = self.x.price(c["exchange"], c["ticker"])
+                price_txt = ""
+                if price:
+                    upnl = (price / c["entry"] - 1) * 100 * sgn
+                    price_txt = f" · now {_f(price)} ({upnl:+.1f}%)"
+                lines.append(
+                    f"  {c['ticker']} {c['direction']} — entry {_f(c['entry'])}{price_txt}"
+                    f" · stop {_f(c['stop'])} · target {_f(c['target'])}"
+                    f" · {c['leverage']}x · open {held_h:.1f}h")
         else:
-            dune_txt = "disabled — set DUNE_API_KEY + DUNE_QUERY_ID (send /dune_setup for the SQL to save)"
-        es_chains = ", ".join({1: "Ethereum", 56: "BSC"}.get(c, str(c))
-                              for c in sorted(self.es.supported_chains)) or "none"
-        es_txt = (f"enabled — {es_chains} — {wallet_txt}" if self.es.enabled
-                  else "disabled — set ETHERSCAN_API_KEY (free, 2 min)")
-        rpc_parts = []
-        for cid in (1, 56):
-            name = "Ethereum" if cid == 1 else "BSC"
-            if self.es.enabled and cid in self.es.supported_chains:
-                continue
-            rpc = self.rpc_by_chain[cid]
-            if rpc.last_fetch:
-                rpc_parts.append(f"{name} ✓ (last fetch "
-                                 f"{(time.time() - rpc.last_fetch) / 60:.0f}m ago, {rpc.last_flows} flows)")
-            else:
-                rpc_parts.append(f"{name} ✓ (keyless, not fetched yet)")
-        rpc_txt = " | ".join(rpc_parts) if rpc_parts else "not needed (Etherscan covers all chains)"
-        try:
-            sent_txt = MarketSentiment.summary(self.sentiment.fetch())
-        except Exception:
-            sent_txt = "unavailable"
-        lines = [
-            "🤖 Market Agent — status",
-            f"Uptime: {(time.time() - self.started) / 3600:.1f}h",
-            f"Exchanges: {ex_txt}",
-            f"🌡 Market: {sent_txt}",
-            f"On-chain (Etherscan): {es_txt}",
-            f"On-chain (public RPC): {rpc_txt}",
-            f"On-chain (Dune): {dune_txt}",
-            f"Open calls: {len(open_calls)}" + (f" ({', '.join(c['ticker'] for c in open_calls)})" if open_calls else ""),
-            f"Calls today: {len(today)} / {self.cfg.max_daily_calls}",
-            f"Scan every {self.cfg.scan_interval_min}m | mover pulse every {self.cfg.pulse_interval_min}m | "
-            f"track every {self.cfg.track_interval_min}m | digest {self.cfg.digest_hour:02d}:{self.cfg.digest_minute:02d} WAT",
-        ]
+            lines.append("  None — no unsettled trades")
+        lines.append("")
+
+        # ---- exchanges the active trades were called on
+        lines.append("📊 Exchanges")
+        if open_calls:
+            by_ex: dict[str, list[str]] = {}
+            for c in open_calls:
+                by_ex.setdefault(c["exchange"].capitalize(), []).append(c["ticker"])
+            for ex, tickers in by_ex.items():
+                lines.append(f"  {ex} — {', '.join(tickers)}")
+        else:
+            lines.append("  None — no active trades")
+        lines.append("")
+
+        # ---- on-chain data used, per token
+        lines.append("🔗 On-chain")
+        if open_calls:
+            for c in open_calls:
+                per = src_map.get(c["ticker"], {})
+                if per:
+                    parts = " · ".join(f"{src_label.get(k, k)} ({v} flows)"
+                                       for k, v in sorted(per.items()))
+                    lines.append(f"  {c['ticker']} — {parts}")
+                else:
+                    lines.append(f"  {c['ticker']} — no tracked-wallet flows recorded")
+        else:
+            lines.append("  No active trades to report")
+        lines.append("")
+
+        # ---- open calls summary
+        lines.append("📋 Open Calls")
+        if open_calls:
+            lines.append(f"  {len(open_calls)} — "
+                         + ", ".join(f"{c['ticker']} {c['direction']}" for c in open_calls))
+        else:
+            lines.append("  0")
+        lines.append("")
+
+        # ---- calls made today (as at now)
+        settled = [c for c in today if c["status"] != "open"]
+        sub = f" ({len(open_calls)} open · {len(settled)} settled)" if today else ""
+        lines.append(f"📊 Calls Today: {len(today)} of {self.cfg.max_daily_calls}{sub}")
         return "\n".join(lines)

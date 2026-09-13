@@ -150,6 +150,19 @@ class Store:
         cur = self._exec("DELETE FROM wallet_flows WHERE ts < ?", (cutoff,))
         return cur.rowcount or 0
 
+    def flow_sources(self, tickers: list[str]) -> dict[str, dict[str, int]]:
+        """Per-token on-chain source breakdown: ticker -> {source: flow_count}."""
+        out: dict[str, dict[str, int]] = {}
+        if not tickers:
+            return out
+        marks = ",".join("?" * len(tickers))
+        rows = self._query(
+            f"SELECT ticker, source, COUNT(*) AS n FROM wallet_flows "
+            f"WHERE ticker IN ({marks}) GROUP BY ticker, source", tickers)
+        for r in rows:
+            out.setdefault(r["ticker"], {})[r["source"] or "unknown"] = r["n"]
+        return out
+
     # ---------- kv ----------
     def get_kv(self, key: str, default=None):
         rows = self._query("SELECT value FROM kv WHERE key=?", (key,))
