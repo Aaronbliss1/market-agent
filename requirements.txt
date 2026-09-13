@@ -1,0 +1,7 @@
+python-telegram-bot>=21.6
+APScheduler>=3.10,<4
+requests>=2.31
+feedparser>=6.0
+python-dotenv>=1.0
+numpy>=1.26
+matplotlib>=3.8
