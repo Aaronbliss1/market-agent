@@ -498,12 +498,16 @@ class Engine:
                 continue
             entry_price = exs[primary].get("last")
             mv = movers.get(t)
-            spec = build_call(t, exs, k1, k4, flows_by[t], news_by[t], self.cfg, now,
-                              entry_price,
-                              fund=self.fundamentals.for_token(t),
-                              sentiment=sentiment,
-                              is_mover=mv is not None,
-                              mover_up=mv["dir"] == "up" if mv else True)
+            try:
+                spec = build_call(t, exs, k1, k4, flows_by[t], news_by[t], self.cfg, now,
+                                  entry_price,
+                                  fund=self.fundamentals.for_token(t),
+                                  sentiment=sentiment,
+                                  is_mover=mv is not None,
+                                  mover_up=mv["dir"] == "up" if mv else True)
+            except Exception as ex:
+                log.warning("scan: %s skipped — build_call failed (%s)", t, ex)
+                continue
             if spec:
                 results.append(spec)
         results.sort(key=lambda s: s.confidence, reverse=True)

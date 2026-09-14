@@ -42,6 +42,16 @@ def tech_signals(k1: dict, k4: dict) -> dict:
     score = 0.0
     c1, c4 = k1["c"], k4["c"]
 
+    # insufficient history (fresh listing / thin series): degrade to a neutral
+    # signal instead of crashing the MACD/RSI indexing — the token simply
+    # won't earn a technical score.
+    if len(c4) < 35 or len(c1) < 20:
+        return {"score": 0.0,
+                "notes": [f"Insufficient candle history ({len(c4)} 4h bars) — no technical signal"],
+                "rsi": float("nan"), "atr_pct": 0.0,
+                "close": float(c4[-1]) if len(c4) else 0.0,
+                "smc": analyze_smc(k4)}
+
     # --- RSI (1h) ---
     r = float(rsi(c1, 14)[-1])
     if r <= 25:
