@@ -233,6 +233,21 @@ def build_call(ticker: str,
     if abs(total) < cfg.min_confidence:
         return None
 
+    # anti-chase guard: when the call comes from a fresh mover (already moved
+    # >= MOVER_24H_PCT% in 24h), never enter long into an overbought 1h RSI
+    # (or short into oversold) — that's the top/bottom of the impulse, where
+    # the easy money was already made. Movers get the momentum bonus instead;
+    # quiet setups are unaffected.
+    if is_mover:
+        if direction == "LONG" and tech["rsi"] >= 65:
+            log.info("%s: mover but 1h RSI %.0f overbought — not chasing long",
+                     ticker, tech["rsi"])
+            return None
+        if direction == "SHORT" and tech["rsi"] <= 35:
+            log.info("%s: mover but 1h RSI %.0f oversold — not chasing short",
+                     ticker, tech["rsi"])
+            return None
+
     conf = min(100.0, abs(total))
 
     # --- calculated risk ---
@@ -243,7 +258,8 @@ def build_call(ticker: str,
 
     lev_by_conf = 3 + int(round(conf / 100.0 * (cfg.max_leverage - 3)))
     lev_by_target = int(cfg.max_target_pct // target_pct) if target_pct > 0 else cfg.max_leverage
-    lev_by_stop = int(100.0 / (stop_pct * 1.7))         # keep liq. buffer beyond stop
+    lev_by_stop = int(100.0 / (stop_pct * 2.5))        # ~40% max loss at stop,
+                                                       # liquidation well beyond it
     leverage = max(2, min(cfg.max_leverage, lev_by_conf, lev_by_target, lev_by_stop))
     if FundamentalsService.microcap(fund):
         leverage = min(leverage, 10)                    # micro-cap safety cap
