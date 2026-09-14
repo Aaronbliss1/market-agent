@@ -29,6 +29,7 @@ class Config:
     digest_hour: int
     digest_minute: int
     max_daily_calls: int
+    max_calls_per_scan: int
     max_leverage: int
     max_target_pct: float
     min_confidence: float
@@ -56,14 +57,15 @@ def load_config(root: Path) -> Config:
         dune_query_id=os.getenv("DUNE_QUERY_ID", "").strip(),
         dune_min_interval_min=_env("DUNE_MIN_INTERVAL_MIN", 30, int),
         owner_id=int(owner) if owner.isdigit() else None,
-        scan_interval_min=_env("SCAN_INTERVAL_MIN", 45, int),
+        scan_interval_min=_env("SCAN_INTERVAL_MIN", 120, int),
         track_interval_min=_env("TRACK_INTERVAL_MIN", 10, int),
         digest_hour=_env("DIGEST_HOUR", 20, int),
         digest_minute=_env("DIGEST_MINUTE", 0, int),
         max_daily_calls=_env("MAX_DAILY_CALLS", 10, int),
+        max_calls_per_scan=_env("MAX_CALLS_PER_SCAN", 2, int),
         max_leverage=_env("MAX_LEVERAGE", 30, int),
         max_target_pct=_env("MAX_TARGET_PCT", 500, float),
-        min_confidence=_env("MIN_CONFIDENCE", 35, float),
+        min_confidence=_env("MIN_CONFIDENCE", 45, float),
         top_n_tokens=_env("TOP_N_TOKENS", 120, int),
         min_24h_usd_volume=_env("MIN_24H_USD_VOLUME", 1_000_000, float),
         call_expiry_hours=_env("CALL_EXPIRY_HOURS", 24, float),
