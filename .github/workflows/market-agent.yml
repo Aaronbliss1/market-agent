@@ -26,7 +26,14 @@ jobs:
           python-version: "3.12"
 
       - name: Install fonts for matplotlib
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core
+        run: |
+          # transient apt blips on hosted runners used to fail the whole run —
+          # retry, and if it still fails, continue: matplotlib renders with
+          # default fonts, the run is not worth losing over fonts.
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core && break
+            sleep 5
+          done || echo "font install failed after retries — continuing with default fonts"
 
       - name: Install Python dependencies
         run: pip install --quiet -r requirements.txt
